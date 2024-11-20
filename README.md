@@ -8,11 +8,15 @@ Large language models (LLMs) exhibit varying strengths and weaknesses across dif
 
 In this work, we empirically investigate the factors influencing ensemble performance, identifying model performance, vocabulary size, and response style as key determinants. Our analysis reveals that compatibility among models is essential for effective ensembling, leading to the development of a straightforward yet effective model selection strategy to identify compatible models.
 
+![Impact of performance gap](figures/Fig1.png)
 Figure 1 shows the impact of performance disparity among models on ensemble effectiveness across different datasets and methods.
 
+![Impact of vocabulary size](figures/Fig2.png)
 Figure 2 represents the impact of performance differences on model ensembling effectiveness on GSM8K dataset. OOM represents out of memory issue.
 
 We introduce the UNIon Top-k Ensembling (UNITE), a novel approach that efficiently combines models by focusing on the union of the top-k tokens from each model. This method avoids the need for full vocabulary alignment, significantly reducing computational overhead. Extensive evaluations across multiple benchmarks demonstrate that UNITE significantly enhances performance compared to existing methods, providing a more efficient framework for LLM ensembling.
+
+![Impact of vocabulary size](figures/Table.png)
 
 ## Usage
 For 2-model ensembling: run ```unite2.py```
