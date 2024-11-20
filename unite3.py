@@ -381,14 +381,14 @@ def ensemble_decoding(test):
 if __name__ == "__main__":
     arg_parse = argparse.ArgumentParser()
     arg_parse.add_argument("--test_set", type=str,
-                           default="/home/wuhan/yuxuan/EmbeddingMapping/datasets/ARC-Challenge/t1.jsonl")
+                           default="Your data path")
     arg_parse.add_argument("--prompts", type=str,
-                           default="/home/wuhan/yuxuan/EmbeddingMapping/datasets/MMLU/dev-jsonl/")
-    arg_parse.add_argument("--model_path1", type=str, default="/home/data/Llama-3-8B-Instruct/")
-    arg_parse.add_argument("--model_path2", type=str, default="/home/data/Qwen2.5-7B-Instruct/")
-    arg_parse.add_argument("--model_path3", type=str, default="/home/data/Qwen2.5-7B-Instruct/")
+                           default="Your prompt path")
+    arg_parse.add_argument("--model_path1", type=str, default="Your model path")
+    arg_parse.add_argument("--model_path2", type=str, default="Your model path")
+    arg_parse.add_argument("--model_path3", type=str, default="Your model path")
     arg_parse.add_argument("--output_file", type=str,
-                           default="/home/wuhan/yuxuan/EmbeddingMapping/datasets/test/")
+                           default="Your output path")
     arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
 
     arg_parse.add_argument("--max_new_tokens", type=int, default=1)
