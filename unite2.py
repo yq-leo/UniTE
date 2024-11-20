@@ -374,13 +374,13 @@ def ensemble_decoding(test):
 if __name__ == "__main__":
     arg_parse = argparse.ArgumentParser()
     arg_parse.add_argument("--test_set", type=str,
-                           default="/home/wuhan/yuxuan/EmbeddingMapping/datasets/TriviaQA/wikipedia_draw.jsonl")
+                           default="Your data path")
     arg_parse.add_argument("--prompts", type=str,
-                           default="/home/wuhan/yuxuan/EmbeddingMapping/datasets/TriviaQA/prompt.txt")
-    arg_parse.add_argument("--model_path1", type=str, default="/home/data/openchat_3.5/")
-    arg_parse.add_argument("--model_path2", type=str, default="/home/data/Mistral-7B-Instruct-v0.3/")
+                           default="Your prompt path")
+    arg_parse.add_argument("--model_path1", type=str, default="Your model path")
+    arg_parse.add_argument("--model_path2", type=str, default="Your model path")
     arg_parse.add_argument("--output_file", type=str,
-                           default="/home/wuhan/yuxuan/EmbeddingMapping/datasets/test/tqa.jsonl")
+                           default="Your output file path")
     arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
     arg_parse.add_argument("--max_new_tokens", type=int, default=10) #different dataset has different max_token_tokens. For ARC: 1; GSM: 512; PIQA:1; NQ:10; TriviaQA:10
 
