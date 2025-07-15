@@ -1,0 +1,10 @@
+tqdm
+numpy
+seaborn
+torch
+torchvision
+torchaudio
+transformers
+matplotlib
+datasets
+accelerate
