@@ -4,7 +4,7 @@ def piqa_collate_fn(batch): #PIQA
         ques = b["question"]
         A = b["A"]
         B = b["B"]
-        prompt_q = f'Answer the question by replying A or B.\nQuestion: {ques}\nA: {A}\nB: {B}\nAnswer:'
+        prompt_q = f'{ques}\nA. {A}\nB. {B}\nAnswer:'
         questions.append(prompt_q)
         answers.append(b["answer"])
     return questions, answers

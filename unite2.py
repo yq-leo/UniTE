@@ -19,6 +19,34 @@ from torch.utils.data import DataLoader
 from accelerate.utils import gather_object
 import matplotlib.pyplot as plt
 
+import re
+from fractions import Fraction
+
+
+def parse_numeric_answer(s: str):
+    s = (s or "").strip()
+
+    # Try common GSM8K/MATH markers first: #### <number or fraction>
+    m = re.search(r"####\s*([-+]?(?:\d+(?:\.\d+)?|\d+/\d+))", s)
+    if not m:
+        # Fallback: last number or fraction in the string
+        m = re.search(r"([-+]?(?:\d+(?:\.\d+)?|\d+/\d+))\s*$", s)
+    if not m:
+        # As a broader fallback: take the last numeric token anywhere
+        toks = re.findall(r"[-+]?(?:\d+(?:\.\d+)?|\d+/\d+)", s)
+        if not toks:
+            return None
+        token = toks[-1]
+    else:
+        token = m.group(1)
+
+    try:
+        if "/" in token:
+            return float(Fraction(token))
+        return float(token)
+    except Exception:
+        return None
+
 
 def softmax(x):
   x = x - np.max(x)
@@ -28,11 +56,12 @@ def softmax(x):
 
   return softmax_x
 
+
 def qa_collate_fn(batch): #TriviaQA/ NQ
     questions, answers = [], []
     for b in batch:
         ques = b["question"]
-        prompt_q = prompt_complex + f'\n\nQuestion: {ques}\nAnswer:'
+        prompt_q = prompt_complex + f'Question:{ques}\nAnswer:'
         questions.append(prompt_q)
         answers.append(b["answer"])
     return questions, answers
@@ -51,6 +80,7 @@ def gsm_collate_fn(batch): #GSM8K
 def count_words_split(text):
   words = text.split()
   return len(words)
+
 
 def get_top_k_tokens(outputs, tokenizer, k=10):
     logits = outputs.logits[0]
@@ -81,6 +111,7 @@ def get_top_k_tokens(outputs, tokenizer, k=10):
 
     return v1
 
+
 def get_union_vocab(v1, v2):
     # Extract unique tokens from both dictionaries
     unique_tokens = []
@@ -88,6 +119,7 @@ def get_union_vocab(v1, v2):
         unique_tokens.append(list(set(v1_tokens.keys()) | set(v2_tokens.keys())))
 
     return unique_tokens
+
 
 def update_vocab(v1, vu, tokenizer, logits, model_name):
     for vu_token, v1_token, logit_ele in zip(vu,v1,logits):
@@ -189,14 +221,42 @@ def drop_token(v1,v2,t):
     return v1_new,v2_new
 
 
-def average_and_sample(v1, v2, lamda, tokenizer):
+def average_and_sample(v1, v2, lamda, tokenizer, ensemble_method):
     next_token, v_avg, next_token_id1,next_token_id2 = [], [], [], []
     for element_v1, element_v2 in zip(v1,v2):
         assert len(element_v1) == len(element_v2)
         v_new = {}
-        for token1 in element_v1:
-            v_new[token1] = [lamda * element_v1[token1][0] + (1-lamda) * element_v2[token1][0],element_v1[token1][1]]
+
+        # --- start of ensemble ---
+        probs1 = torch.tensor([element_v1[token1][0] for token1 in element_v1], device=element_v1[list(element_v1.keys())[0]][0].device)
+        probs2 = torch.tensor([element_v2[token1][0] for token1 in element_v1], device=element_v2[list(element_v2.keys())[0]][0].device)
+        probs = torch.stack([probs1, probs2], dim=0)
+
+        token_confs = torch.ones_like(probs)
+        model_confs = torch.tensor([[lamda], [1-lamda]], device=probs.device)
+        if ensemble_method != 'vanilla':
+            p_star = probs1
+            if ensemble_method[:4] == 'tas2':
+                p_star = torch.mean(probs, dim=0, keepdim=True)
+            token_confs = torch.exp(-torch.abs(probs - p_star))
+
+            if ensemble_method[-4:] == 'mas2':
+                model_confs = model_confs * torch.sum(token_confs, dim=1, keepdim=True)
+
+        avg_probs = torch.sum(model_confs * token_confs * probs, dim=0)
+        # --- end of ensemble ---
+
+        avg_probs = avg_probs.cpu().detach().numpy().tolist()
+        v_new = {token1: [avg_prob, element_v1[token1][1]] for token1, avg_prob in zip(element_v1, avg_probs)}
         v_avg.append(v_new)
+
+        # for token1 in element_v1:
+        #     prob1 = element_v1[token1][0]
+        #     prob2 = element_v2[token1][0]
+        #     # conf = torch.exp(-torch.abs(prob1 - prob2))
+        #     conf = 1
+        #     v_new[token1] = [conf * lamda * prob1 + (1-lamda) * prob2, element_v1[token1][1]]
+        # v_avg.append(v_new)
 
         probs = []
         for item in v_new.values():
@@ -215,6 +275,7 @@ def average_and_sample(v1, v2, lamda, tokenizer):
 
     return next_token, v_avg, next_token_id1, next_token_id2
 
+
 def pad_list(list_name,pad_id):
     list_len = [len(item) for item in list_name]
     max_len = max(list_len)
@@ -226,7 +287,8 @@ def pad_list(list_name,pad_id):
 
     return list_name
 
-def ensemble_decoding(test):
+
+def ensemble_decoding(test, ensemble_method):
     fw = open(args.output_file, "w", encoding="utf-8")
 
     accelerator.wait_for_everyone()
@@ -287,8 +349,8 @@ def ensemble_decoding(test):
             distribution2.append(logits2)
 
 
-            v1 = get_top_k_tokens(outputs1,tokenizer1,10)
-            v2 = get_top_k_tokens(outputs2,tokenizer2,10)
+            v1 = get_top_k_tokens(outputs1, tokenizer1, 10)
+            v2 = get_top_k_tokens(outputs2, tokenizer2, 10)
 
             v1_sfmx = vocab_softmax(v1)
             v2_sfmx = vocab_softmax(v2)
@@ -300,7 +362,7 @@ def ensemble_decoding(test):
 
             v1_new, v2_new = v1_update, v2_update
 
-            next_token, v_avg, next_token_id1, next_token_id2 = average_and_sample(v1_new,v2_new,0.5, tokenizer1)
+            _, _, next_token_id1, next_token_id2 = average_and_sample(v1_new, v2_new, 0.5, tokenizer1, ensemble_method)
 
 
             i1, i2, m1, m2 = [], [], [], []
@@ -330,7 +392,11 @@ def ensemble_decoding(test):
         ans_num = []
         for gold_ans in answers:
             if 'gsm' in test:
-                ans_num.append(float(re.search(r"#### (-?\d+)", gold_ans).group(1)))
+                val = parse_numeric_answer(gold_ans)
+                if val is None:
+                    # decide what to do: skip, set to NaN, or raise a clearer error
+                    raise ValueError(f"Could not parse numeric gold answer from: {gold_ans!r}")
+                ans_num.append(val)
             else:
                 ans_num.append(gold_ans)
         label_list.extend(ans_num)
@@ -367,25 +433,44 @@ def ensemble_decoding(test):
     for qs, pred, label, solution, ori_ans in zip(gather_qs, gather_pred, gather_label, gather_solution,
                                                   gather_ori_solution):
         fw.write(json.dumps(
-            {"question": qs, "original_sln": ori_ans, "pred_solution": solution, "pred": pred, "label": label},
+            {"question": qs, "prediction": pred, "answer": ori_ans, "original_sln": ori_ans, "pred_solution": solution, "pred": pred, "label": label},
             ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
     arg_parse = argparse.ArgumentParser()
-    arg_parse.add_argument("--test_set", type=str,
-                           default="Your data path")
-    arg_parse.add_argument("--prompts", type=str,
-                           default="Your prompt path")
-    arg_parse.add_argument("--model_path1", type=str, default="Your model path")
-    arg_parse.add_argument("--model_path2", type=str, default="Your model path")
-    arg_parse.add_argument("--output_file", type=str,
-                           default="Your output file path")
-    arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
-    arg_parse.add_argument("--max_new_tokens", type=int, default=10) #different dataset has different max_token_tokens. For ARC: 1; GSM: 512; PIQA:1; NQ:10; TriviaQA:10
+
+    # arg_parse.add_argument("--test_set", type=str,
+    #                        default="Your data path")
+    # arg_parse.add_argument("--prompts", type=str,
+    #                        default="Your prompt path")
+    # arg_parse.add_argument("--model_path1", type=str, default="Your model path")
+    # arg_parse.add_argument("--model_path2", type=str, default="Your model path")
+    # arg_parse.add_argument("--output_file", type=str,
+    #                        default="Your output file path")
+    # arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
+    # arg_parse.add_argument("--max_new_tokens", type=int, default=10) #different dataset has different max_token_tokens. For ARC: 1; GSM: 512; PIQA:1; NQ:10; TriviaQA:10
+
+    arg_parse.add_argument("--config", type=str, help="Path to the config file")
+    arg_parse.add_argument("--run_mode", "-rm", type=str, choices=['dev', 'test'], help="Run mode, either 'dev' or 'test'")
+    arg_parse.add_argument("--ensemble_method", "-em", choices=['vanilla', 'tas', 'tas2', 'tas2+mas2'], type=str, help="Ensemble method")
+    arg_parse.add_argument("--result_save_dir", "-rsd", type=str, help="Result save directory")
 
     args = arg_parse.parse_args()
 
+    with open(args.config, 'r', encoding='utf-8') as f:
+        config_json = json.load(f)
+
+    args.test_set = config_json['file_path'][f'{args.run_mode}_file_path']
+    args.prompts = config_json['file_path']['prompt_path']
+
+    args.model_path1 = config_json['model_paths']['model_path1']
+    args.model_path2 = config_json['model_paths']['model_path2']
+
+    args.output_file = f"{args.result_save_dir}/pred.jsonl"
+
+    args.max_new_tokens = config_json['run_parameter']['max_new_tokens']
+    args.per_device_batch_size = config_json['run_parameter']['per_device_batch_size']
 
     accelerator = Accelerator()
 
@@ -398,16 +483,22 @@ if __name__ == "__main__":
     #load model, tokenizer, generation_config
     model_path1, model_path2= args.model_path1, args.model_path2
 
-    model1 = AutoModelForCausalLM.from_pretrained(model_path1, output_attentions=True, device_map=device1,
-                                       attn_implementation="flash_attention_2",
-                                       torch_dtype=torch.float16).eval()
+    model1 = AutoModelForCausalLM.from_pretrained(model_path1,
+                                                  output_attentions=False,
+                                                  device_map=device1,
+                                                  attn_implementation="eager",
+                                                  torch_dtype=torch.float16,
+                                                  trust_remote_code=True).eval()
 
 
-    model2 = AutoModelForCausalLM.from_pretrained(model_path2, output_attentions=True, device_map=device2,
-                                       attn_implementation="flash_attention_2",
-                                       torch_dtype=torch.float16).eval()
+    model2 = AutoModelForCausalLM.from_pretrained(model_path2,
+                                                  output_attentions=False,
+                                                  device_map=device2,
+                                                  attn_implementation="eager",
+                                                  torch_dtype=torch.float16,
+                                                  trust_remote_code=True).eval()
 
-    tokenizer1, tokenizer2 = AutoTokenizer.from_pretrained(model_path1), AutoTokenizer.from_pretrained(model_path2)
+    tokenizer1, tokenizer2 = AutoTokenizer.from_pretrained(model_path1, trust_remote_code=True), AutoTokenizer.from_pretrained(model_path2, trust_remote_code=True)
 
     tokenizer1.pad_token = tokenizer1.eos_token
     tokenizer2.pad_token = tokenizer2.eos_token
@@ -443,7 +534,7 @@ if __name__ == "__main__":
     test_dataset = load_dataset("json", data_files=args.test_set)['train']
     if 'gsm' in args.test_set.lower():
         ds_loader = DataLoader(test_dataset, batch_size=args.per_device_batch_size, collate_fn=gsm_collate_fn, num_workers=2)
-    if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower():
+    if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower() or 'naturalquestions' in args.test_set.lower():
         ds_loader = DataLoader(test_dataset, batch_size=args.per_device_batch_size, collate_fn=qa_collate_fn, num_workers=2)
     if 'arc' in args.test_set.lower():
         ds_loader = DataLoader(test_dataset, batch_size=args.per_device_batch_size, collate_fn=arc_collate_fn, num_workers=2)
@@ -455,10 +546,10 @@ if __name__ == "__main__":
     seed_list = [1987]
     for seed in seed_list:
         print('Start ensembling *********************:')
-        ensemble_decoding(args.test_set.lower())
+        ensemble_decoding(args.test_set.lower(), args.ensemble_method)
         if 'gsm' in args.test_set.lower():
             gsm_parse_pred_ans(args.output_file)
-        if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower():
+        if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower() or 'naturalquestions' in args.test_set.lower():
             qa_parse_pred_ans(args.output_file)
         if 'arc' in args.test_set.lower() or 'piqa' in args.test_set.lower():
             arc_parse_pred_ans(args.output_file)
