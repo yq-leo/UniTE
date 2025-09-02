@@ -433,7 +433,7 @@ def ensemble_decoding(test, ensemble_method):
     for qs, pred, label, solution, ori_ans in zip(gather_qs, gather_pred, gather_label, gather_solution,
                                                   gather_ori_solution):
         fw.write(json.dumps(
-            {"question": qs, "prediction": pred, "answer": ori_ans, "original_sln": ori_ans, "pred_solution": solution, "pred": pred, "label": label},
+            {"answer": ori_ans, "prediction": pred, "question": qs, "original_sln": ori_ans, "pred_solution": solution, "pred": pred, "label": label},
             ensure_ascii=False) + "\n")
 
 
