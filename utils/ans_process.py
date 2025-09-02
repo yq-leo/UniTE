@@ -33,7 +33,8 @@ def arc_parse_pred_ans(filename):
     print('num_q %d correct %d ratio %.4f' % (total, correct, float(correct / total)))
     return float(correct / total)
 
-#TriviaQA NQ
+
+# TriviaQA NQ
 def qa_parse_pred_ans(filename):
     total, correct = 0, 0
     with open(filename, "r", encoding="utf-8") as fr:

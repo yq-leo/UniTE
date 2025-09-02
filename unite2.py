@@ -61,7 +61,7 @@ def qa_collate_fn(batch): #TriviaQA/ NQ
     questions, answers = [], []
     for b in batch:
         ques = b["question"]
-        prompt_q = prompt_complex + f'Question:{ques}\nAnswer:'
+        prompt_q = "<s>" + prompt_complex + f'Question:{ques}\nAnswer:'
         questions.append(prompt_q)
         answers.append(b["answer"])
     return questions, answers
