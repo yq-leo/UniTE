@@ -122,7 +122,7 @@ def get_union_vocab(v1, v2):
 
 
 def update_vocab(v1, vu, tokenizer, logits, model_name):
-    for vu_token, v1_token, logit_ele in zip(vu,v1,logits):
+    for vu_token, v1_token, logit_ele in zip(vu, v1, logits):
         v1_token_ids = []
         for item in v1_token.values():
             v1_token_ids.append(item[1])

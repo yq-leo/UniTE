@@ -1,6 +1,7 @@
 import json
 import re
 
+
 # GSM
 def gsm_parse_pred_ans(filename):
     total, correct = 0, 0
@@ -15,6 +16,7 @@ def gsm_parse_pred_ans(filename):
             else:
                 continue
     print('num_q %d correct %d ratio %.4f' % (total, correct, float(correct / total)))
+
 
 # ARC/PIQA/MMLU
 def arc_parse_pred_ans(filename):
