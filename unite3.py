@@ -30,6 +30,26 @@ def softmax(x):
   return softmax_x
 
 
+def qa_collate_fn(batch): #TriviaQA/ NQ
+    questions, answers = [], []
+    for b in batch:
+        ques = b["question"]
+        prompt_q = "<s>" + prompt_complex + f'Question:{ques}\nAnswer:'
+        questions.append(prompt_q)
+        answers.append(b["answer"])
+    return questions, answers
+
+
+def gsm_collate_fn(batch): #GSM8K
+    questions, answers = [], []
+    for b in batch:
+        ques = b["question"]
+        prompt_q = prompt_complex + f'\n\nQuestion: {ques}\nLet\'s think step by step\n'
+        questions.append(prompt_q)
+        answers.append(b["answer"])
+    return questions, answers
+
+
 def count_words_split(text):
   words = text.split()
   return len(words)
@@ -166,7 +186,7 @@ def drop_token(v1,v2,t):
     return v1_new,v2_new
 
 
-def average_and_sample(v1, v2, v3, lamda, tokenizer):
+def average_and_sample(v1, v2, v3, lamda, tokenizer, ensemble_method):
     next_token, v_avg, next_token_id1, next_token_id2, next_token_id3 = [], [], [], [], []
 
     for element_v1, element_v2, element_v3 in zip(v1, v2, v3):
@@ -174,16 +194,40 @@ def average_and_sample(v1, v2, v3, lamda, tokenizer):
 
         v_new = {}
 
-        for token1 in element_v1:
-            v_new[token1] = [
-                1/3 * element_v1[token1][0] +
-                1/3 * element_v2[token1][0] + 1/3 * element_v3[token1][0],
-                element_v1[token1][1]
-            ]
+        # --- start of ensemble ---
+        probs1 = torch.tensor([element_v1[token1][0] for token1 in element_v1], device=element_v1[list(element_v1.keys())[0]][0].device)
+        probs2 = torch.tensor([element_v2[token1][0] for token1 in element_v1], device=element_v2[list(element_v2.keys())[0]][0].device)
+        probs3 = torch.tensor([element_v3[token1][0] for token1 in element_v1], device=element_v3[list(element_v3.keys())[0]][0].device)
+        probs = torch.stack([probs1, probs2, probs3], dim=0)
 
+        token_confs = torch.ones_like(probs)
+        model_confs = torch.tensor([[1/3], [1/3], [1/3]], device=probs.device)
+        if ensemble_method != 'vanilla':
+            p_star = probs1
+            if ensemble_method[:4] == 'tas2':
+                p_star = torch.mean(probs, dim=0, keepdim=True)
+            token_confs = torch.exp(-torch.abs(probs - p_star))
+
+            if ensemble_method[-4:] == 'mas2':
+                model_confs = model_confs * torch.sum(token_confs, dim=1, keepdim=True)
+
+        avg_probs = torch.sum(model_confs * token_confs * probs, dim=0)
+        # --- end of ensemble ---
+
+        avg_probs = avg_probs.cpu().detach().numpy().tolist()
+        v_new = {token1: [avg_prob, element_v1[token1][1]] for token1, avg_prob in zip(element_v1, avg_probs)}
         v_avg.append(v_new)
-        probs = [item[0] for item in v_new.values()]
 
+        # for token1 in element_v1:
+        #     v_new[token1] = [
+        #         1/3 * element_v1[token1][0] +
+        #         1/3 * element_v2[token1][0] + 1/3 * element_v3[token1][0],
+        #         element_v1[token1][1]
+        #     ]
+
+        # v_avg.append(v_new)
+
+        probs = [item[0] for item in v_new.values()]
 
         sample_index = probs.index(max(probs))
 
@@ -209,7 +253,7 @@ def pad_list(list_name,pad_id):
 
     return list_name
 
-def ensemble_decoding(test):
+def ensemble_decoding(test, ensemble_method):
     fw = open(args.output_file, "a", encoding="utf-8")
 
     accelerator.wait_for_everyone()
@@ -297,7 +341,7 @@ def ensemble_decoding(test):
             v1_new, v2_new, v3_new = v1_update, v2_update, v3_update
 
 
-            next_token, v_avg, next_token_id1, next_token_id2, next_token_id3 = average_and_sample(v1_new,v2_new,v3_new,0.5, tokenizer1)
+            next_token, v_avg, next_token_id1, next_token_id2, next_token_id3 = average_and_sample(v1_new,v2_new,v3_new,0.5, tokenizer1, ensemble_method)
 
             end_time = time.time()
             latency = start_time - end_time
@@ -374,26 +418,46 @@ def ensemble_decoding(test):
     for qs, pred, label, solution, ori_ans in zip(gather_qs, gather_pred, gather_label, gather_solution,
                                                   gather_ori_solution):
         fw.write(json.dumps(
-            {"question": qs, "original_sln": ori_ans, "pred_solution": solution, "pred": pred, "label": label},
+            {"answer": ori_ans, "prediction": pred, "question": qs, "original_sln": ori_ans, "pred_solution": solution, "pred": pred, "label": label},
             ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
     arg_parse = argparse.ArgumentParser()
-    arg_parse.add_argument("--test_set", type=str,
-                           default="Your data path")
-    arg_parse.add_argument("--prompts", type=str,
-                           default="Your prompt path")
-    arg_parse.add_argument("--model_path1", type=str, default="Your model path")
-    arg_parse.add_argument("--model_path2", type=str, default="Your model path")
-    arg_parse.add_argument("--model_path3", type=str, default="Your model path")
-    arg_parse.add_argument("--output_file", type=str,
-                           default="Your output path")
-    arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
 
-    arg_parse.add_argument("--max_new_tokens", type=int, default=1)
+    # arg_parse.add_argument("--test_set", type=str,
+    #                        default="Your data path")
+    # arg_parse.add_argument("--prompts", type=str,
+    #                        default="Your prompt path")
+    # arg_parse.add_argument("--model_path1", type=str, default="Your model path")
+    # arg_parse.add_argument("--model_path2", type=str, default="Your model path")
+    # arg_parse.add_argument("--model_path3", type=str, default="Your model path")
+    # arg_parse.add_argument("--output_file", type=str,
+    #                        default="Your output path")
+    # arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
+    # arg_parse.add_argument("--max_new_tokens", type=int, default=1)
+
+    arg_parse.add_argument("--config", type=str, help="Path to the config file")
+    arg_parse.add_argument("--run_mode", "-rm", type=str, choices=['dev', 'test'], help="Run mode, either 'dev' or 'test'")
+    arg_parse.add_argument("--ensemble_method", "-em", choices=['vanilla', 'tas', 'tas2', 'tas2+mas2'], type=str, help="Ensemble method")
+    arg_parse.add_argument("--result_save_dir", "-rsd", type=str, help="Result save directory")
 
     args = arg_parse.parse_args()
+
+    with open(args.config, 'r', encoding='utf-8') as f:
+        config_json = json.load(f)
+
+    args.test_set = config_json['file_path'][f'{args.run_mode}_file_path']
+    args.prompts = config_json['file_path']['prompt_path']
+
+    args.model_path1 = config_json['model_paths']['model_path1']
+    args.model_path2 = config_json['model_paths']['model_path2']
+    args.model_path3 = config_json['model_paths']['model_path3']
+
+    args.output_file = f"{args.result_save_dir}/pred.jsonl"
+
+    args.max_new_tokens = config_json['run_parameter']['max_new_tokens']
+    args.per_device_batch_size = config_json['run_parameter']['per_device_batch_size']
 
 
     accelerator = Accelerator()
@@ -401,30 +465,33 @@ if __name__ == "__main__":
     device2 = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     device3 = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
+    prompt_complex = open(args.prompts, "r", encoding="utf-8").read()
+
     model_path1, model_path2, model_path3 = args.model_path1, args.model_path2, args.model_path3
 
     model1 = AutoModelForCausalLM.from_pretrained(
         model_path1,
         device_map=device1,
-        attn_implementation="flash_attention_2",
+        attn_implementation="eager",
         torch_dtype=torch.float16,
         trust_remote_code=True,
     ).eval()
 
 
     model2 = AutoModelForCausalLM.from_pretrained(model_path2, output_attentions=True, device_map=device2,
-                                       attn_implementation="flash_attention_2",
-                                       torch_dtype=torch.float16).eval()
+                                       attn_implementation="eager",
+                                       torch_dtype=torch.float16,
+                                       trust_remote_code=True).eval()
 
     model3 = AutoModelForCausalLM.from_pretrained(model_path3, output_attentions=True, device_map=device3,
-                                       attn_implementation="flash_attention_2",
-                                       torch_dtype=torch.float16
-                                                  ).eval()
+                                       attn_implementation="eager",
+                                       torch_dtype=torch.float16,
+                                       trust_remote_code=True).eval()
 
 
-    tokenizer1 = AutoTokenizer.from_pretrained(model_path1)
-    tokenizer2 = AutoTokenizer.from_pretrained(model_path2)
-    tokenizer3 = AutoTokenizer.from_pretrained(model_path3)
+    tokenizer1 = AutoTokenizer.from_pretrained(model_path1, trust_remote_code=True)
+    tokenizer2 = AutoTokenizer.from_pretrained(model_path2, trust_remote_code=True)
+    tokenizer3 = AutoTokenizer.from_pretrained(model_path3, trust_remote_code=True)
 
     tokenizer1.pad_token = tokenizer1.eos_token
     tokenizer2.pad_token = tokenizer2.eos_token
@@ -444,7 +511,7 @@ if __name__ == "__main__":
         output_logits=True,
         # output_attentions =True,
         return_dict_in_generate=True,
-        use_cache=True,
+        use_cache=False,
     )
 
     generation_config2 = GenerationConfig(
@@ -456,7 +523,7 @@ if __name__ == "__main__":
         output_scores=True,
         output_logits=True,
         return_dict_in_generate=True,
-        use_cache=True,
+        use_cache=False,
     )
 
     generation_config3 = GenerationConfig(
@@ -468,7 +535,7 @@ if __name__ == "__main__":
         output_scores=True,
         output_logits=True,
         return_dict_in_generate=True,
-        use_cache=True,
+        use_cache=False,
     )
 
     # load_data
@@ -476,7 +543,7 @@ if __name__ == "__main__":
     if 'gsm' in args.test_set.lower():
         ds_loader = DataLoader(test_dataset, batch_size=args.per_device_batch_size, collate_fn=gsm_collate_fn,
                                num_workers=2)
-    if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower():
+    if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower() or 'naturalquestions' in args.test_set.lower():
         ds_loader = DataLoader(test_dataset, batch_size=args.per_device_batch_size, collate_fn=qa_collate_fn,
                                num_workers=2)
     if 'arc' in args.test_set.lower():
@@ -491,10 +558,10 @@ if __name__ == "__main__":
     seed_list = [1987]
     for seed in seed_list:
         print('Start ensembling *********************:')
-        ensemble_decoding(args.test_set.lower())
+        ensemble_decoding(args.test_set.lower(), args.ensemble_method)
         if 'gsm' in args.test_set.lower():
             gsm_parse_pred_ans(args.output_file)
-        if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower():
+        if 'triviaqa' in args.test_set.lower() or 'nq' in args.test_set.lower() or 'naturalquestions' in args.test_set.lower():
             qa_parse_pred_ans(args.output_file)
         if 'arc' in args.test_set.lower() or 'piqa' in args.test_set.lower():
             arc_parse_pred_ans(args.output_file)
