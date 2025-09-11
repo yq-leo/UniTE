@@ -52,18 +52,19 @@ def collate_fn(batch): #MMLU
     questions, answers = [], []
     for b in batch:
         ques = b["question"]
+        domain = b["domain"]
         A = b["A"]
         B = b["B"]
         C = b["C"]
         D = b["D"]
-        prompt_q = prompt + f'Answer the question by replying A, B, C or D.\nQuestion: {ques}\nA: {A}\nB: {B}\nC: {C}\nD: {D}\nAnswer:'
+        prompt_q = prompt + f'<s>There is a single choice question about {domain}. Answer the question by replying A, B, C or D.\nQuestion: {ques}\nA. {A}\nB. {B}\nC. {C}\nD. {D}\nAnswer:'
         # print('******prompt_q:\n', prompt_q)
         questions.append(prompt_q)
         answers.append(b["answer"])
 
     return questions, answers
 
-def  parse_pred_ans(filename):
+def parse_pred_ans(filename):
     total, correct = 0, 0
     gold_ans = []
     qs = []
@@ -370,19 +371,38 @@ def ensemble_decoding(test):
 
 if __name__ == "__main__":
     arg_parse = argparse.ArgumentParser()
-    arg_parse.add_argument("--test_set", type=str,
-                           default="MMLU/test-jsonl/")
-    arg_parse.add_argument("--prompts", type=str,
-                           default="MMLU/dev-jsonl/")
-    arg_parse.add_argument("--model_path1", type=str, default="Your model path")
-    arg_parse.add_argument("--model_path2", type=str, default="Your model path")
-    arg_parse.add_argument("--output_file", type=str,
-                           default="Your output path")
-    arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
 
-    arg_parse.add_argument("--max_new_tokens", type=int, default=1)
+    # arg_parse.add_argument("--test_set", type=str,
+    #                        default="MMLU/test-jsonl/")
+    # arg_parse.add_argument("--prompts", type=str,
+    #                        default="MMLU/dev-jsonl/")
+    # arg_parse.add_argument("--model_path1", type=str, default="Your model path")
+    # arg_parse.add_argument("--model_path2", type=str, default="Your model path")
+    # arg_parse.add_argument("--output_file", type=str,
+    #                        default="Your output path")
+    # arg_parse.add_argument("--per_device_batch_size", type=int, default=1)
+    # arg_parse.add_argument("--max_new_tokens", type=int, default=1)
+
+    arg_parse.add_argument("--config", type=str, help="Path to the config file")
+    arg_parse.add_argument("--run_mode", "-rm", type=str, choices=['dev', 'test'], help="Run mode, either 'dev' or 'test'")
+    arg_parse.add_argument("--ensemble_method", "-em", choices=['vanilla', 'tas', 'tas2', 'tas2+mas2'], type=str, help="Ensemble method")
+    arg_parse.add_argument("--result_save_dir", "-rsd", type=str, help="Result save directory")
 
     args = arg_parse.parse_args()
+
+    with open(args.config, 'r', encoding='utf-8') as f:
+        config_json = json.load(f)
+
+    args.test_set = config_json['file_path'][f'{args.run_mode}_file_path']
+    args.prompts = config_json['file_path']['prompt_path']
+
+    args.model_path1 = config_json['model_paths']['model_path1']
+    args.model_path2 = config_json['model_paths']['model_path2']
+
+    args.output_file = f"{args.result_save_dir}/pred.jsonl"
+
+    args.max_new_tokens = config_json['run_parameter']['max_new_tokens']
+    args.per_device_batch_size = config_json['run_parameter']['per_device_batch_size']
 
     accelerator = Accelerator()
 
@@ -395,12 +415,12 @@ if __name__ == "__main__":
     model_path1, model_path2= args.model_path1, args.model_path2
 
     model1 = AutoModelForCausalLM.from_pretrained(model_path1, device_map=device1,
-                                       attn_implementation="flash_attention_2",
+                                       attn_implementation="eager",
                                        torch_dtype=torch.float16).eval()
 
 
     model2 = AutoModelForCausalLM.from_pretrained(model_path2, device_map=device2,
-                                       attn_implementation="flash_attention_2",
+                                       attn_implementation="eager",
                                        torch_dtype=torch.float16).eval()
 
     tokenizer1, tokenizer2 = AutoTokenizer.from_pretrained(model_path1), AutoTokenizer.from_pretrained(model_path2)

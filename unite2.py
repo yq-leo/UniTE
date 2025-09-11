@@ -57,7 +57,7 @@ def softmax(x):
   return softmax_x
 
 
-def qa_collate_fn(batch): #TriviaQA/ NQ
+def qa_collate_fn(batch): #TriviaQA/NQ
     questions, answers = [], []
     for b in batch:
         ques = b["question"]
@@ -71,7 +71,7 @@ def gsm_collate_fn(batch): #GSM8K
     questions, answers = [], []
     for b in batch:
         ques = b["question"]
-        prompt_q = prompt_complex + f'\n\nQuestion: {ques}\nLet\'s think step by step\n'
+        prompt_q = prompt_complex + f'\n\nQuestion: {ques}\nLet\'s think step by step\nAnswer:'
         questions.append(prompt_q)
         answers.append(b["answer"])
     return questions, answers
@@ -236,9 +236,11 @@ def average_and_sample(v1, v2, lamda, tokenizer, ensemble_method):
         model_confs = torch.tensor([[lamda], [1-lamda]], device=probs.device)
         if ensemble_method != 'vanilla':
             p_star = probs1
-            if ensemble_method[:4] == 'tas2':
+            if ensemble_method[:4] in ['tas2', 'tas3']:
                 p_star = torch.mean(probs, dim=0, keepdim=True)
             token_confs = torch.exp(-torch.abs(probs - p_star))
+            if ensemble_method[:4] == 'tas3':
+                token_confs[0, :] = 1.0 # exclude main model
 
             if ensemble_method[-4:] == 'mas2':
                 model_confs = model_confs * torch.sum(token_confs, dim=1, keepdim=True)
@@ -453,7 +455,7 @@ if __name__ == "__main__":
 
     arg_parse.add_argument("--config", type=str, help="Path to the config file")
     arg_parse.add_argument("--run_mode", "-rm", type=str, choices=['dev', 'test'], help="Run mode, either 'dev' or 'test'")
-    arg_parse.add_argument("--ensemble_method", "-em", choices=['vanilla', 'tas', 'tas2', 'tas2+mas2'], type=str, help="Ensemble method")
+    arg_parse.add_argument("--ensemble_method", "-em", choices=['vanilla', 'tas', 'tas2', 'tas2+mas2', 'tas3+mas2'], type=str, help="Ensemble method")
     arg_parse.add_argument("--result_save_dir", "-rsd", type=str, help="Result save directory")
 
     args = arg_parse.parse_args()
@@ -515,7 +517,7 @@ if __name__ == "__main__":
         output_scores=True,
         output_logits=True,
         return_dict_in_generate=True,
-        use_cache=True,
+        use_cache=False,
     )
 
     generation_config2 = GenerationConfig(
@@ -527,7 +529,7 @@ if __name__ == "__main__":
         output_scores=True,
         output_logits=True,
         return_dict_in_generate=True,
-        use_cache=True,
+        use_cache=False,
     )
 
     # load_data

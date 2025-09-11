@@ -18,7 +18,7 @@ def arc_collate_fn(batch): #ARC-C
         B = b["B"]
         C = b["C"]
         D = b["D"]
-        prompt_q = f'Answer the question by replying A, B, C or D.\nQuestion: {ques}\nA: {A}\nB: {B}\nC: {C}\nD: {D}\nAnswer:'
+        prompt_q = f'Answer the question by replying A, B, C or D.\nQuestion: {ques}\nA. {A}\nB. {B}\nC. {C}\nD. {D}\nAnswer:'
         questions.append(prompt_q)
         answers.append(b["answer"])
 
