@@ -1,0 +1,16 @@
+{
+    "model_paths": {
+        "model_path1": "internlm/internlm2_5-7b-chat",
+        "model_path2": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "model_path3": "mistralai/Mistral-7B-Instruct-v0.1"
+    },
+    "file_path": {
+        "dev_file_path": "/home/qiyu6/UniTE/datasets/PIQA/train_our.jsonl",
+        "test_file_path": "/home/qiyu6/UniTE/datasets/PIQA/dev_our.jsonl",
+        "prompt_path": "/home/qiyu6/UniTE/datasets/PIQA/prompt.txt"
+    },
+    "run_parameter": {
+        "max_new_tokens": 1,
+        "per_device_batch_size": 1
+    }
+}

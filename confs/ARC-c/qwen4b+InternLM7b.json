@@ -1,0 +1,15 @@
+{
+    "model_paths": {
+        "model_path1": "Qwen/Qwen3-4B-Instruct-2507",
+        "model_path2": "internlm/internlm2_5-7b-chat"
+    },
+    "file_path": {
+        "dev_file_path": "/home/qiyu6/UniTE/datasets/ARC-challenge/train.jsonl",
+        "test_file_path": "/home/qiyu6/UniTE/datasets/ARC-challenge/test.jsonl",
+        "prompt_path": "/home/qiyu6/UniTE/datasets/ARC-challenge/prompt.txt"
+    },
+    "run_parameter": {
+        "max_new_tokens": 1,
+        "per_device_batch_size": 1
+    }
+}

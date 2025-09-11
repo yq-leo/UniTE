@@ -1,0 +1,16 @@
+{
+    "model_paths": {
+        "model_path1": "openchat/openchat-3.5-0106",
+        "model_path2": "internlm/internlm2_5-7b-chat",
+        "model_path3": "meta-llama/Meta-Llama-3-8B-Instruct"
+    },
+    "file_path": {
+        "dev_file_path": "/home/qiyu6/UniTE/datasets/NaturalQuestions/dev/v1.0-simplified_simplified-nq-train.simpled_dev_100000_sample1600_seed42.jsonl",
+        "test_file_path": "/home/qiyu6/UniTE/datasets/NaturalQuestions/test/natural-questions.jsonl",
+        "prompt_path": "/home/qiyu6/UniTE/datasets/NaturalQuestions/dev/nq_prompt.txt"
+    },
+    "run_parameter": {
+        "max_new_tokens": 10,
+        "per_device_batch_size": 1
+    }
+}
