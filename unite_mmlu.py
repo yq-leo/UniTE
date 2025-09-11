@@ -57,7 +57,7 @@ def collate_fn(batch): #MMLU
         B = b["B"]
         C = b["C"]
         D = b["D"]
-        prompt_q = prompt + f'<s>There is a single choice question about {domain}. Answer the question by replying A, B, C or D.\nQuestion: {ques}\nA. {A}\nB. {B}\nC. {C}\nD. {D}\nAnswer:'
+        prompt_q = f'<s>There is a single choice question about {domain}. Answer the question by replying A, B, C or D.\nQuestion: {ques}\nA. {A}\nB. {B}\nC. {C}\nD. {D}\nAnswer:'
         # print('******prompt_q:\n', prompt_q)
         questions.append(prompt_q)
         answers.append(b["answer"])
@@ -197,14 +197,40 @@ def drop_token(v1,v2,t):
     return v1_new,v2_new
 
 
-def average_and_sample(v1, v2, lamda, tokenizer):
+def average_and_sample(v1, v2, lamda, tokenizer, ensemble_method):
     next_token, v_avg, next_token_id1,next_token_id2 = [], [], [], []
     for element_v1, element_v2 in zip(v1,v2):
         assert len(element_v1) == len(element_v2)
         v_new = {}
-        for token1 in element_v1:
-            v_new[token1] = [lamda * element_v1[token1][0] + (1-lamda) * element_v2[token1][0],element_v1[token1][1]]
+
+        # --- start of ensemble ---
+        probs1 = torch.tensor([element_v1[token1][0] for token1 in element_v1], device=element_v1[list(element_v1.keys())[0]][0].device)
+        probs2 = torch.tensor([element_v2[token1][0] for token1 in element_v1], device=element_v2[list(element_v2.keys())[0]][0].device)
+        probs = torch.stack([probs1, probs2], dim=0)
+
+        token_confs = torch.ones_like(probs)
+        model_confs = torch.tensor([[lamda], [1-lamda]], device=probs.device)
+        if ensemble_method != 'vanilla':
+            p_star = probs1
+            if ensemble_method[:4] in ['tas2', 'tas3']:
+                p_star = torch.mean(probs, dim=0, keepdim=True)
+            token_confs = torch.exp(-torch.abs(probs - p_star))
+            if ensemble_method[:4] == 'tas3':
+                token_confs[0, :] = 1.0 # exclude main model
+
+            if ensemble_method[-4:] == 'mas2':
+                model_confs = model_confs * torch.sum(token_confs, dim=1, keepdim=True)
+
+        avg_probs = torch.sum(model_confs * token_confs * probs, dim=0)
+        # --- end of ensemble ---
+
+        avg_probs = avg_probs.cpu().detach().numpy().tolist()
+        v_new = {token1: [avg_prob, element_v1[token1][1]] for token1, avg_prob in zip(element_v1, avg_probs)}
         v_avg.append(v_new)
+
+        # for token1 in element_v1:
+        #     v_new[token1] = [lamda * element_v1[token1][0] + (1-lamda) * element_v2[token1][0],element_v1[token1][1]]
+        # v_avg.append(v_new)
 
         probs = []
         for item in v_new.values():
@@ -215,7 +241,6 @@ def average_and_sample(v1, v2, lamda, tokenizer):
         i = 0
         for item1 in v_new.keys():
             if i == sample_index:
-
                 next_token.append(tokenizer.convert_ids_to_tokens(element_v1[item1][1]))
                 next_token_id1.append(element_v1[item1][1])
                 next_token_id2.append(element_v2[item1][1])
@@ -234,7 +259,7 @@ def pad_list(list_name,pad_id):
 
     return list_name
 
-def ensemble_decoding(test):
+def ensemble_decoding(test, ensemble_method):
     fw = open(args.output_file, "a", encoding="utf-8")
 
     accelerator.wait_for_everyone()
@@ -308,7 +333,7 @@ def ensemble_decoding(test):
 
             v1_new, v2_new = v1_update, v2_update
 
-            next_token, v_avg, next_token_id1, next_token_id2 = average_and_sample(v1_new,v2_new,0.5, tokenizer1)
+            next_token, v_avg, next_token_id1, next_token_id2 = average_and_sample(v1_new,v2_new,0.5, tokenizer1, ensemble_method)
 
             end_time = time.time()
 
@@ -475,18 +500,19 @@ if __name__ == "__main__":
         if prompt_file_name in test_file_map:
             print(prompt_file_name)
             test_file_path = test_file_map[prompt_file_name]
-            prompt = ''
-            prompt_read = load_dataset("json", data_files=promptf)['train']
-            for data in prompt_read:
-                prompt += 'Question: ' + data['question'] + '\n'
-                prompt += 'A: ' + data['A'] + '\n'
-                prompt += 'B: ' + data['B'] + '\n'
-                prompt += 'C: ' + data['C'] + '\n'
-                prompt += 'D: ' + data['D'] + '\n'
-                prompt += 'Answer: ' + data['answer'] + '\n\n'
+
+            # prompt = ''
+            # prompt_read = load_dataset("json", data_files=promptf)['train']
+            # for data in prompt_read:
+            #     prompt += 'Question: ' + data['question'] + '\n'
+            #     prompt += 'A: ' + data['A'] + '\n'
+            #     prompt += 'B: ' + data['B'] + '\n'
+            #     prompt += 'C: ' + data['C'] + '\n'
+            #     prompt += 'D: ' + data['D'] + '\n'
+            #     prompt += 'Answer: ' + data['answer'] + '\n\n'
 
             print('Start reasoning *********************:')
-            ensemble_decoding(test_file_path)
+            ensemble_decoding(test_file_path, args.ensemble_method)
             acc = parse_pred_ans(args.output_file)
             acc_list.append(acc)
             print('End reasoning =======================:')
