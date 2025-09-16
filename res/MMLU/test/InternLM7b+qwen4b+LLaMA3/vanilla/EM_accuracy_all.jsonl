@@ -1,0 +1,2 @@
+{"accuracy": "71.14", "num_total": 14015, "num_correct": 9970, "sys_file_path": "res/MMLU/test/InternLM7b+qwen4b+LLaMA3/vanilla/pred.jsonl"}
+{"accuracy": "71.14", "num_total": 14015, "num_correct": 9970, "sys_file_path": "res/MMLU/test/InternLM7b+qwen4b+LLaMA3/vanilla/pred.jsonl"}

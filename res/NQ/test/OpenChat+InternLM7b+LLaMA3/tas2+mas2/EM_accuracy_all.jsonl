@@ -1,1 +1,2 @@
 {"accuracy": "22.88", "num_total": 3610, "num_correct": 826, "sys_file_path": "res/NQ/test/OpenChat+InternLM7b+LLaMA3/tas2+mas2/pred.jsonl"}
+{"accuracy": "22.88", "num_total": 3610, "num_correct": 826, "sys_file_path": "res/NQ/test/OpenChat+InternLM7b+LLaMA3/tas2+mas2/pred.jsonl"}
