@@ -1,9 +1,9 @@
-export CUDA_VISIBLE_DEVICES=2,3
+export CUDA_VISIBLE_DEVICES=3,2
 
 task=MMLU
-rm=dev
+rm=test
 models=InternLM7b+qwen4b
-em=vanilla
+em=tas2+mas2
 
 res_path=./res/${task}/${rm}/${models}/${em}
 log_path=./log/${task}/${rm}/${models}/${em}

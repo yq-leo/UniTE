@@ -35,7 +35,7 @@ def find_files_with_suffix(folder_path, suffix):
 
 
 result_file_dir = sys.argv[1]
-is_choice = 'piqa' in result_file_dir.lower() or 'arc-c' in result_file_dir.lower()
+is_choice = 'piqa' in result_file_dir.lower() or 'arc-c' in result_file_dir.lower() or 'mmlu' in result_file_dir.lower()
 # is_choice = False
 
 jsonl_files_list = find_files_with_suffix(result_file_dir, "pred.jsonl")

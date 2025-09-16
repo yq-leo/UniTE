@@ -111,13 +111,15 @@ def get_top_k_tokens(outputs, tokenizer, k=10):
 
     return v1
 
-def get_union_vocab(v1, v2):
-    # Extract unique tokens from both dictionaries
+
+def get_union_vocab(v1, v2, v3):
     unique_tokens = []
-    for v1_tokens, v2_tokens in zip(v1,v2):
-        unique_tokens.append(list(set(v1_tokens.keys()) | set(v2_tokens.keys())))
+    for v1_tokens, v2_tokens, v3_tokens in zip(v1, v2, v3):
+        combined_tokens = set(v1_tokens.keys()) | set(v2_tokens.keys()) | set(v3_tokens.keys())
+        unique_tokens.append(list(combined_tokens))
 
     return unique_tokens
+
 
 def update_vocab(v1, vu, tokenizer, logits, model_name):
     for vu_token, v1_token, logit_ele in zip(vu,v1,logits):
@@ -197,19 +199,22 @@ def drop_token(v1,v2,t):
     return v1_new,v2_new
 
 
-def average_and_sample(v1, v2, lamda, tokenizer, ensemble_method):
-    next_token, v_avg, next_token_id1,next_token_id2 = [], [], [], []
-    for element_v1, element_v2 in zip(v1,v2):
-        assert len(element_v1) == len(element_v2)
+def average_and_sample(v1, v2, v3, lamda, tokenizer, ensemble_method):
+    next_token, v_avg, next_token_id1, next_token_id2, next_token_id3 = [], [], [], [], []
+
+    for element_v1, element_v2, element_v3 in zip(v1, v2, v3):
+        assert len(element_v1) == len(element_v2) == len(element_v3), "The length of vocabularies from different models should be the same, len(v1)={}, len(v2)={}, len(v3)={}".format(len(element_v1), len(element_v2), len(element_v3))
+
         v_new = {}
 
         # --- start of ensemble ---
         probs1 = torch.tensor([element_v1[token1][0] for token1 in element_v1], device=element_v1[list(element_v1.keys())[0]][0].device)
         probs2 = torch.tensor([element_v2[token1][0] for token1 in element_v1], device=element_v2[list(element_v2.keys())[0]][0].device)
-        probs = torch.stack([probs1, probs2], dim=0)
+        probs3 = torch.tensor([element_v3[token1][0] for token1 in element_v1], device=element_v3[list(element_v3.keys())[0]][0].device)
+        probs = torch.stack([probs1, probs2, probs3], dim=0)
 
         token_confs = torch.ones_like(probs)
-        model_confs = torch.tensor([[lamda], [1-lamda]], device=probs.device)
+        model_confs = torch.tensor([[1/3], [1/3], [1/3]], device=probs.device)
         if ensemble_method != 'vanilla':
             p_star = probs1
             if ensemble_method[:4] in ['tas2', 'tas3']:
@@ -229,7 +234,12 @@ def average_and_sample(v1, v2, lamda, tokenizer, ensemble_method):
         v_avg.append(v_new)
 
         # for token1 in element_v1:
-        #     v_new[token1] = [lamda * element_v1[token1][0] + (1-lamda) * element_v2[token1][0],element_v1[token1][1]]
+        #     v_new[token1] = [
+        #         1/3 * element_v1[token1][0] +
+        #         1/3 * element_v2[token1][0] + 1/3 * element_v3[token1][0],
+        #         element_v1[token1][1]
+        #     ]
+
         # v_avg.append(v_new)
 
         probs = []
@@ -244,9 +254,11 @@ def average_and_sample(v1, v2, lamda, tokenizer, ensemble_method):
                 next_token.append(tokenizer.convert_ids_to_tokens(element_v1[item1][1]))
                 next_token_id1.append(element_v1[item1][1])
                 next_token_id2.append(element_v2[item1][1])
+                next_token_id3.append(element_v3[item1][1])
             i+=1
 
-    return next_token, v_avg, next_token_id1, next_token_id2
+    return next_token, v_avg, next_token_id1, next_token_id2, next_token_id3
+
 
 def pad_list(list_name,pad_id):
     list_len = [len(item) for item in list_name]
@@ -285,12 +297,15 @@ def ensemble_decoding(test, ensemble_method):
 
         inputs1 = tokenizer1(questions, padding=True, return_tensors="pt").to(device1)
         inputs2 = tokenizer2(questions, padding=True, return_tensors="pt").to(device2)
+        inputs3 = tokenizer3(questions, padding=True, return_tensors="pt").to(device3)
 
         input_ids1 = inputs1['input_ids'].to(device1)
         input_ids2 = inputs2['input_ids'].to(device2)
+        input_ids3 = inputs3['input_ids'].to(device3)
 
         attention_mask1 = inputs1['attention_mask'].to(device1)
         attention_mask2 = inputs2['attention_mask'].to(device2)
+        attention_mask3 = inputs3['attention_mask'].to(device3)
 
         input_length = [len(qs) for qs in input_ids1]
 
@@ -306,6 +321,10 @@ def ensemble_decoding(test, ensemble_method):
                                            attention_mask=attention_mask2,
                                            generation_config=generation_config2,
                                            )
+                outputs3 = model3.generate(input_ids=input_ids3,
+                                           attention_mask=attention_mask3,
+                                           generation_config=generation_config3,
+                                           )
             else:
                 outputs1 = model1.generate(input_ids=input_ids1,
                                            attention_mask=attention_mask1,
@@ -314,31 +333,41 @@ def ensemble_decoding(test, ensemble_method):
                                            )
                 outputs2 = model2.generate(input_ids=input_ids2,
                                            attention_mask=attention_mask2,
+                                           past_key_values=past_key_values2,
                                            generation_config=generation_config2,
+                                           )
+                outputs3 = model3.generate(input_ids=input_ids3,
+                                           attention_mask=attention_mask3,
+                                           past_key_values=past_key_values3,
+                                           generation_config=generation_config3,
                                            )
 
             past_key_values1 = outputs1.past_key_values
-
+            past_key_values2 = outputs2.past_key_values
+            past_key_values3 = outputs3.past_key_values
 
             v1 = get_top_k_tokens(outputs1,tokenizer1,10)
             v2 = get_top_k_tokens(outputs2,tokenizer2,10)
+            v3 = get_top_k_tokens(outputs3,tokenizer3,10)
 
             v1_sfmx = vocab_softmax(v1)
             v2_sfmx = vocab_softmax(v2)
+            v3_sfmx = vocab_softmax(v3)
 
-            vu = get_union_vocab(v1, v2)
+            vu = get_union_vocab(v1, v2, v3)
 
-            v1_update = update_vocab(v1, vu, tokenizer1, outputs1.logits[0],'llama2')
-            v2_update = update_vocab(v2, vu, tokenizer2, outputs2.logits[0],'deepseek')
+            v1_update = update_vocab(v1, vu, tokenizer1, outputs1.logits[0], 'llama3.1')
+            v2_update = update_vocab(v2, vu, tokenizer2, outputs2.logits[0], 'llama3')
+            v3_update = update_vocab(v3, vu, tokenizer3, outputs3.logits[0], 'qwen2')
 
-            v1_new, v2_new = v1_update, v2_update
+            v1_new, v2_new, v3_new = v1_update, v2_update, v3_update
 
-            next_token, v_avg, next_token_id1, next_token_id2 = average_and_sample(v1_new,v2_new,0.5, tokenizer1, ensemble_method)
+            next_token, v_avg, next_token_id1, next_token_id2, next_token_id3 = average_and_sample(v1_new, v2_new, v3_new, 0.5, tokenizer1, ensemble_method)
 
             end_time = time.time()
 
-            i1, i2, m1, m2 = [], [], [], []
-            for pred_token_id1, pred_token_id2, input1_ids, input2_ids, mask1, mask2 in zip(next_token_id1,next_token_id2,input_ids1,input_ids2,attention_mask1,attention_mask2):
+            i1, m1 = [], []
+            for pred_token_id1, input1_ids, mask1 in zip(next_token_id1, input_ids1, attention_mask1):
                 input1_ids = input1_ids.tolist()
                 mask1 = mask1.tolist()
 
@@ -352,9 +381,13 @@ def ensemble_decoding(test, ensemble_method):
             attention_mask1 = torch.tensor(m1).to(device1)
 
             iter_input2 = tokenizer2(tokenizer1.batch_decode(input_ids1), padding=True, return_tensors="pt").to(device2)
-
             input_ids2 = iter_input2['input_ids'].to(device2)
             attention_mask2 = iter_input2['attention_mask'].to(device2)
+
+            iter_input3 = tokenizer3(tokenizer1.batch_decode(input_ids1), padding=True, return_tensors="pt").to(device3)
+            input_ids3 = iter_input3['input_ids'].to(device3)
+            attention_mask3 = iter_input3['attention_mask'].to(device3)
+
 
         for qs_len, ans in zip(input_length, input_ids1):
             output = tokenizer1.decode(ans[qs_len:], skip_special_tokens=True)
@@ -423,6 +456,7 @@ if __name__ == "__main__":
 
     args.model_path1 = config_json['model_paths']['model_path1']
     args.model_path2 = config_json['model_paths']['model_path2']
+    args.model_path3 = config_json['model_paths']['model_path3']
 
     args.output_file = f"{args.result_save_dir}/pred.jsonl"
 
@@ -434,10 +468,10 @@ if __name__ == "__main__":
     # load device, prompt
     device1 = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     device2 = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-
+    device3 = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
     #load model, tokenizer, generation_config
-    model_path1, model_path2= args.model_path1, args.model_path2
+    model_path1, model_path2, model_path3 = args.model_path1, args.model_path2, args.model_path3
 
     model1 = AutoModelForCausalLM.from_pretrained(model_path1, device_map=device1,
                                        attn_implementation="eager",
@@ -450,12 +484,22 @@ if __name__ == "__main__":
                                        torch_dtype=torch.float16,
                                        trust_remote_code=True).eval()
 
-    tokenizer1, tokenizer2 = AutoTokenizer.from_pretrained(model_path1, trust_remote_code=True), AutoTokenizer.from_pretrained(model_path2, trust_remote_code=True)
+    model3 = AutoModelForCausalLM.from_pretrained(model_path3, output_attentions=True, device_map=device3,
+                                       attn_implementation="eager",
+                                       torch_dtype=torch.float16,
+                                       trust_remote_code=True).eval()
+
+    tokenizer1 = AutoTokenizer.from_pretrained(model_path1, trust_remote_code=True)
+    tokenizer2 = AutoTokenizer.from_pretrained(model_path2, trust_remote_code=True)
+    tokenizer3 = AutoTokenizer.from_pretrained(model_path3, trust_remote_code=True)
+
     tokenizer1.pad_token = tokenizer1.eos_token
     tokenizer2.pad_token = tokenizer2.eos_token
+    tokenizer3.pad_token = tokenizer3.eos_token
 
     tokenizer1.padding_side = "left"
     tokenizer2.padding_side = "left"
+    tokenizer3.padding_side = "left"
 
     generation_config1 = GenerationConfig(
         num_beams=1,
@@ -473,6 +517,18 @@ if __name__ == "__main__":
         num_beams=1,
         do_sample=False,
         pad_token_id=tokenizer2.eos_token_id,
+        max_new_tokens=1,
+        output_hidden_states=True,
+        output_scores=True,
+        output_logits=True,
+        return_dict_in_generate=True,
+        use_cache=False,
+    )
+
+    generation_config3 = GenerationConfig(
+        num_beams=1,
+        do_sample=False,
+        pad_token_id=tokenizer3.eos_token_id,
         max_new_tokens=1,
         output_hidden_states=True,
         output_scores=True,

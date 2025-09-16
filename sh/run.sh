@@ -1,9 +1,9 @@
-export CUDA_VISIBLE_DEVICES=3,2
+export CUDA_VISIBLE_DEVICES=2,3
 
-task=PIQA
-rm=dev
-models=OpenChat+LLaMA
-em=tas2+mas2
+task=GSM8K
+rm=test
+models=qwen4b+InternLM7b
+em=tas3+mas2
 
 res_path=./res/${task}/${rm}/${models}/${em}
 log_path=./log/${task}/${rm}/${models}/${em}
